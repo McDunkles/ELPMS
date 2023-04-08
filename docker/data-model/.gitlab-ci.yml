@@ -1,0 +1,356 @@
+# https://docs.gitlab.com/ee/ci/yaml/README.html#workflowrules-templates
+include:
+  - template: 'Workflows/Branch-Pipelines.gitlab-ci.yml'
+
+stages:
+  - build
+  - generate-env-vars
+  - version
+  - deploy-dev-initial
+  - deploy-dev-tenants
+  #- deploy-dev-gigamonster
+  #- deploy-dev-redbison
+  - deploy-prod-tenants
+
+variables:
+  CI_REGISTRY: gcr.io
+  CI_GROUP_NAME: celestial-gist-278615 
+  PROJECT_ID: celestial-gist-278615
+  CONTAINER_IMAGE: ${CI_REGISTRY}/${CI_GROUP_NAME}/$CI_PROJECT_NAME
+
+maven-build:
+  stage: build
+  image: adoptopenjdk/maven-openjdk11
+  script:
+    - mvn clean package
+  artifacts:
+    paths:
+      - target/
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+generate-env-vars:
+  stage: generate-env-vars
+  image: vasilkryvous/minideb:latest
+  script:
+    # Remove trailing sha-like suffix from 1.0.0-13-g225c3d9 --> 1.0.0-13
+    - TAG=$(git describe --tags `git rev-list --tags --max-count=1` | cut -d"-" -f1-2)
+    - echo ${TAG}
+    - echo "export TAG=${TAG}" > .variables
+    - echo "Printing short_sha for commit and tag if exist - CI_COMMIT_SHORT_SHA-TAG"
+    - echo ${TAG}-${CI_COMMIT_SHORT_SHA}
+    - cat .variables
+  after_script: 
+    - echo "CI_PIPELINE_SOURCE="${CI_PIPELINE_SOURCE}
+    - echo "CI_MERGE_REQUEST_TARGET_BRANCH_NAME="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
+    - echo "CI_COMMIT_TAG="${CI_COMMIT_TAG}
+  artifacts:
+    paths:
+    - .variables
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+
+version:
+  stage: version
+  image: mrooding/gitlab-semantic-versioning:latest
+  # https://github.com/mrooding/gitlab-semantic-versioning
+  script:
+    - python3 /version-update/version-update.py
+  after_script:
+    - TAG=$(git describe --tags `git rev-list --tags --max-count=1` | cut -d"-" -f1-2)
+    - echo ${TAG}-${CI_COMMIT_SHORT_SHA}
+    # rewrite the "true"/just outdated tag from the generate-env-vars stage
+    - echo "export TAG=${TAG}" > .variables
+  artifacts:
+    paths:
+    - .variables
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+
+postgres-deploy-dev-fyrefish:
+  stage: deploy-dev-initial
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk:alpine
+  variables: 
+    SCOPE: dev
+    TENANT: fyrefish
+    TENANT_PASSWORD: ${DATA_MODEL_DEV_FYREFISH_TENANT_DB_PASSWORD}
+    ZONE: us-west3-c
+    DST_HOST: postgres-dev-mig-stateful-lm8s
+    APP_USER: appuser
+    DBHOSTADDR: ${DST_HOST}.${ZONE}.c.${PROJECT_ID}.internal
+    DBNAME: postgis
+    DBUSER: postgis
+  before_script:
+    - echo "$COMPUTE_INSTANCE_CONNECTOR_SA" > "$HOME/compute-instance-connector.json"
+    - gcloud auth activate-service-account --key-file "$HOME/compute-instance-connector.json"
+    - gcloud config set project ${PROJECT_ID}
+    - gcloud auth list
+  script:
+    - set -x
+    # Prepare env 
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/signals"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/scripts"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/$CI_PROJECT_NAME"
+    - rm -rf ${CI_PROJECT_DIR}/.git
+    - gcloud compute scp --tunnel-through-iap --recurse ${CI_PROJECT_DIR} $APP_USER@$DST_HOST:/home/$APP_USER --zone $ZONE --quiet
+    # Run the db-configure script
+    - export VERSION=$(ls -d ${CI_PROJECT_DIR}/src/main/database/* | egrep -v db-configure | sort -nr | head -1 | cut -d "/" -f8)
+    - 'echo "export VERSION=$VERSION" >> ~/init_vars.sh'
+    - 'echo "export CI_PROJECT_NAME=$CI_PROJECT_NAME" >> ~/init_vars.sh'
+    - 'echo "export TENANT=${TENANT}" >> ~/init_vars.sh'
+    - 'echo "export TENANT_PASSWORD=${TENANT_PASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export PGPASSWORD=${DATA_MODEL_DEV_ROOT_PGPASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export DBHOSTADDR=172.17.0.2" >> ~/init_vars.sh'
+    - 'echo "export DBNAME=$DBNAME" >> ~/init_vars.sh'
+    - 'echo "export DBUSER=$DBUSER" >> ~/init_vars.sh'
+    - cat ~/init_vars.sh
+    - gcloud compute scp --tunnel-through-iap ${CI_PROJECT_DIR}/src/main/database/db-configure.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/db-configure.sh --zone $ZONE --quiet
+    - gcloud compute scp --tunnel-through-iap ~/init_vars.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/init_vars.sh --zone $ZONE --quiet
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "ls -lr /home/$APP_USER/scripts/*; chmod +x /home/$APP_USER/scripts/*"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "source /home/$APP_USER/scripts/db-configure.sh"
+  environment:
+    name: ${SCOPE}-${TENANT}
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+#      when: manual
+
+#-----
+# DEV
+#-----
+postgres-deploy-dev-gigamonster:
+  stage: deploy-dev-tenants
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk:alpine
+  variables: 
+    SCOPE: dev
+    TENANT: gigamonster
+    TENANT_PASSWORD: ${DATA_MODEL_DEV_GIGAMONSTER_TENANT_DB_PASSWORD}
+    ZONE: us-west3-c
+    DST_HOST: postgres-dev-mig-stateful-lm8s
+    APP_USER: appuser
+    DBHOSTADDR: ${DST_HOST}.${ZONE}.c.${PROJECT_ID}.internal
+    DBNAME: postgis
+    DBUSER: postgis
+  before_script:
+    - echo "$COMPUTE_INSTANCE_CONNECTOR_SA" > "$HOME/compute-instance-connector.json"
+    - gcloud auth activate-service-account --key-file "$HOME/compute-instance-connector.json"
+    - gcloud config set project ${PROJECT_ID}
+    - gcloud auth list
+  script:
+    - set -x
+    # Prepare env 
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/signals"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/scripts"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/$CI_PROJECT_NAME"
+    - rm -rf ${CI_PROJECT_DIR}/.git
+    - gcloud compute scp --tunnel-through-iap --recurse ${CI_PROJECT_DIR} $APP_USER@$DST_HOST:/home/$APP_USER --zone $ZONE --quiet
+    # Run the db-configure script
+    - export VERSION=$(ls -d ${CI_PROJECT_DIR}/src/main/database/* | egrep -v db-configure | sort -nr | head -1 | cut -d "/" -f8)
+    - 'echo "export VERSION=$VERSION" >> ~/init_vars.sh'
+    - 'echo "export CI_PROJECT_NAME=$CI_PROJECT_NAME" >> ~/init_vars.sh'
+    - 'echo "export TENANT=${TENANT}" >> ~/init_vars.sh'
+    - 'echo "export TENANT_PASSWORD=${TENANT_PASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export PGPASSWORD=${DATA_MODEL_DEV_ROOT_PGPASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export DBHOSTADDR=172.17.0.2" >> ~/init_vars.sh'
+    - 'echo "export DBNAME=$DBNAME" >> ~/init_vars.sh'
+    - 'echo "export DBUSER=$DBUSER" >> ~/init_vars.sh'
+    - cat ~/init_vars.sh
+    - gcloud compute scp --tunnel-through-iap ${CI_PROJECT_DIR}/src/main/database/db-configure.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/db-configure.sh --zone $ZONE --quiet
+    - gcloud compute scp --tunnel-through-iap ~/init_vars.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/init_vars.sh --zone $ZONE --quiet
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "ls -lr /home/$APP_USER/scripts/*; chmod +x /home/$APP_USER/scripts/*"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "source /home/$APP_USER/scripts/db-configure.sh"
+  environment:
+    name: ${SCOPE}-${TENANT}
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: manual
+
+postgres-deploy-dev-redbison:
+  stage: deploy-dev-tenants
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk:alpine
+  variables: 
+    SCOPE: dev
+    TENANT: redbison
+    TENANT_PASSWORD: ${DATA_MODEL_DEV_REDBISON_TENANT_DB_PASSWORD}
+    ZONE: us-west3-c
+    DST_HOST: postgres-dev-mig-stateful-lm8s
+    APP_USER: appuser
+    DBHOSTADDR: ${DST_HOST}.${ZONE}.c.${PROJECT_ID}.internal
+    DBNAME: postgis
+    DBUSER: postgis
+  before_script:
+    - echo "$COMPUTE_INSTANCE_CONNECTOR_SA" > "$HOME/compute-instance-connector.json"
+    - gcloud auth activate-service-account --key-file "$HOME/compute-instance-connector.json"
+    - gcloud config set project ${PROJECT_ID}
+    - gcloud auth list
+  script:
+    - set -x
+    # Prepare env 
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/signals"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/scripts"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/$CI_PROJECT_NAME"
+    - rm -rf ${CI_PROJECT_DIR}/.git
+    - gcloud compute scp --tunnel-through-iap --recurse ${CI_PROJECT_DIR} $APP_USER@$DST_HOST:/home/$APP_USER --zone $ZONE --quiet
+    # Run the db-configure script
+    - export VERSION=$(ls -d ${CI_PROJECT_DIR}/src/main/database/* | egrep -v db-configure | sort -nr | head -1 | cut -d "/" -f8)
+    - 'echo "export VERSION=$VERSION" >> ~/init_vars.sh'
+    - 'echo "export CI_PROJECT_NAME=$CI_PROJECT_NAME" >> ~/init_vars.sh'
+    - 'echo "export TENANT=${TENANT}" >> ~/init_vars.sh'
+    - 'echo "export TENANT_PASSWORD=${TENANT_PASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export PGPASSWORD=${DATA_MODEL_DEV_ROOT_PGPASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export DBHOSTADDR=172.17.0.2" >> ~/init_vars.sh'
+    - 'echo "export DBNAME=$DBNAME" >> ~/init_vars.sh'
+    - 'echo "export DBUSER=$DBUSER" >> ~/init_vars.sh'
+    - cat ~/init_vars.sh
+    - gcloud compute scp --tunnel-through-iap ${CI_PROJECT_DIR}/src/main/database/db-configure.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/db-configure.sh --zone $ZONE --quiet
+    - gcloud compute scp --tunnel-through-iap ~/init_vars.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/init_vars.sh --zone $ZONE --quiet
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "ls -lr /home/$APP_USER/scripts/*; chmod +x /home/$APP_USER/scripts/*"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "source /home/$APP_USER/scripts/db-configure.sh"
+  environment:
+    name: ${SCOPE}-${TENANT}
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: manual
+
+#------
+# PROD
+#------
+postgres-deploy-prod-gigamonster:
+  stage: deploy-prod-tenants
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk:alpine
+  variables: 
+    SCOPE: prod
+    TENANT: gigamonster
+    TENANT_PASSWORD: ${DATA_MODEL_PROD_GIGAMONSTER_TENANT_DB_PASSWORD}
+    ZONE: us-west3-c
+    DST_HOST: postgres
+    APP_USER: l_user # temporary due to the ERROR: (gcloud.compute.ssh) [/usr/bin/ssh] exited with return code [255].
+    DBHOSTADDR: ${DST_HOST}.${ZONE}.c.${PROJECT_ID}.internal
+    DBNAME: postgis
+    DBUSER: postgis
+  before_script:
+    - echo "$COMPUTE_INSTANCE_CONNECTOR_SA" > "$HOME/compute-instance-connector.json"
+    - gcloud auth activate-service-account --key-file "$HOME/compute-instance-connector.json"
+    - gcloud config set project ${PROJECT_ID}
+    - gcloud auth list
+  script:
+    - set -x
+    # Prepare env 
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/signals"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/scripts"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/$CI_PROJECT_NAME"
+    - rm -rf ${CI_PROJECT_DIR}/.git
+    - gcloud compute scp --tunnel-through-iap --recurse ${CI_PROJECT_DIR} $APP_USER@$DST_HOST:/home/$APP_USER --zone $ZONE --quiet
+    # Run the db-configure script
+    - export VERSION=$(ls -d ${CI_PROJECT_DIR}/src/main/database/* | egrep -v db-configure | sort -nr | head -1 | cut -d "/" -f8)
+    - 'echo "export VERSION=$VERSION" >> ~/init_vars.sh'
+    - 'echo "export CI_PROJECT_NAME=$CI_PROJECT_NAME" >> ~/init_vars.sh'
+    - 'echo "export TENANT=${TENANT}" >> ~/init_vars.sh'
+    - 'echo "export TENANT_PASSWORD=${TENANT_PASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export PGPASSWORD=${DATA_MODEL_PROD_ROOT_PGPASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export DBHOSTADDR=172.17.0.2" >> ~/init_vars.sh'
+    - 'echo "export DBNAME=$DBNAME" >> ~/init_vars.sh'
+    - 'echo "export DBUSER=$DBUSER" >> ~/init_vars.sh'
+    - cat ~/init_vars.sh
+    - gcloud compute scp --tunnel-through-iap ${CI_PROJECT_DIR}/src/main/database/db-configure.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/db-configure.sh --zone $ZONE --quiet
+    - gcloud compute scp --tunnel-through-iap ~/init_vars.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/init_vars.sh --zone $ZONE --quiet
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "ls -lr /home/$APP_USER/scripts/*; chmod +x /home/$APP_USER/scripts/*"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "source /home/$APP_USER/scripts/db-configure.sh"
+  environment:
+    name: ${SCOPE}-${TENANT}
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "production"'
+      when: manual
+
+postgres-deploy-prod-redbison:
+  stage: deploy-prod-tenants
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk:alpine
+  variables: 
+    SCOPE: prod
+    TENANT: redbison
+    TENANT_PASSWORD: ${DATA_MODEL_PROD_REDBISON_TENANT_DB_PASSWORD}
+    ZONE: us-west3-c
+    DST_HOST: postgres
+    APP_USER: l_user # temporary due to the ERROR: (gcloud.compute.ssh) [/usr/bin/ssh] exited with return code [255].
+    DBHOSTADDR: ${DST_HOST}.${ZONE}.c.${PROJECT_ID}.internal
+    DBNAME: postgis
+    DBUSER: postgis
+  before_script:
+    - echo "$COMPUTE_INSTANCE_CONNECTOR_SA" > "$HOME/compute-instance-connector.json"
+    - gcloud auth activate-service-account --key-file "$HOME/compute-instance-connector.json"
+    - gcloud config set project ${PROJECT_ID}
+    - gcloud auth list
+  script:
+    - set -x
+    # Prepare env 
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/signals"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/scripts"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/$CI_PROJECT_NAME"
+    - rm -rf ${CI_PROJECT_DIR}/.git
+    - gcloud compute scp --tunnel-through-iap --recurse ${CI_PROJECT_DIR} $APP_USER@$DST_HOST:/home/$APP_USER --zone $ZONE --quiet
+    # Run the db-configure script
+    - export VERSION=$(ls -d ${CI_PROJECT_DIR}/src/main/database/* | egrep -v db-configure | sort -nr | head -1 | cut -d "/" -f8)
+    - 'echo "export VERSION=$VERSION" >> ~/init_vars.sh'
+    - 'echo "export CI_PROJECT_NAME=$CI_PROJECT_NAME" >> ~/init_vars.sh'
+    - 'echo "export TENANT=${TENANT}" >> ~/init_vars.sh'
+    - 'echo "export TENANT_PASSWORD=${TENANT_PASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export PGPASSWORD=${DATA_MODEL_PROD_ROOT_PGPASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export DBHOSTADDR=172.17.0.2" >> ~/init_vars.sh'
+    - 'echo "export DBNAME=$DBNAME" >> ~/init_vars.sh'
+    - 'echo "export DBUSER=$DBUSER" >> ~/init_vars.sh'
+    - cat ~/init_vars.sh
+    - gcloud compute scp --tunnel-through-iap ${CI_PROJECT_DIR}/src/main/database/db-configure.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/db-configure.sh --zone $ZONE --quiet
+    - gcloud compute scp --tunnel-through-iap ~/init_vars.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/init_vars.sh --zone $ZONE --quiet
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "ls -lr /home/$APP_USER/scripts/*; chmod +x /home/$APP_USER/scripts/*"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "source /home/$APP_USER/scripts/db-configure.sh"
+  environment:
+    name: ${SCOPE}-${TENANT}
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "production"'
+      when: manual
+
+postgres-deploy-prod-gigstreem:
+  stage: deploy-prod-tenants
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk:alpine
+  variables: 
+    SCOPE: prod
+    TENANT: gigstreem
+    TENANT_PASSWORD: ${DATA_MODEL_PROD_GIGSTREEM_TENANT_DB_PASSWORD}
+    ZONE: us-west3-c
+    DST_HOST: postgres
+    APP_USER: l_user # temporary due to the ERROR: (gcloud.compute.ssh) [/usr/bin/ssh] exited with return code [255].
+    DBHOSTADDR: ${DST_HOST}.${ZONE}.c.${PROJECT_ID}.internal
+    DBNAME: postgis
+    DBUSER: postgis
+  before_script:
+    - echo "$COMPUTE_INSTANCE_CONNECTOR_SA" > "$HOME/compute-instance-connector.json"
+    - gcloud auth activate-service-account --key-file "$HOME/compute-instance-connector.json"
+    - gcloud config set project ${PROJECT_ID}
+    - gcloud auth list
+  script:
+    - set -x
+    # Prepare env 
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/signals"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/scripts"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "mkdir -p /home/$APP_USER/$CI_PROJECT_NAME"
+    - rm -rf ${CI_PROJECT_DIR}/.git
+    - gcloud compute scp --tunnel-through-iap --recurse ${CI_PROJECT_DIR} $APP_USER@$DST_HOST:/home/$APP_USER --zone $ZONE --quiet
+    # Run the db-configure script
+    - export VERSION=$(ls -d ${CI_PROJECT_DIR}/src/main/database/* | egrep -v db-configure | sort -nr | head -1 | cut -d "/" -f8)
+    - 'echo "export VERSION=$VERSION" >> ~/init_vars.sh'
+    - 'echo "export CI_PROJECT_NAME=$CI_PROJECT_NAME" >> ~/init_vars.sh'
+    - 'echo "export TENANT=${TENANT}" >> ~/init_vars.sh'
+    - 'echo "export TENANT_PASSWORD=${TENANT_PASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export PGPASSWORD=${DATA_MODEL_PROD_ROOT_PGPASSWORD}" >> ~/init_vars.sh'
+    - 'echo "export DBHOSTADDR=172.17.0.2" >> ~/init_vars.sh'
+    - 'echo "export DBNAME=$DBNAME" >> ~/init_vars.sh'
+    - 'echo "export DBUSER=$DBUSER" >> ~/init_vars.sh'
+    - cat ~/init_vars.sh
+    - gcloud compute scp --tunnel-through-iap ${CI_PROJECT_DIR}/src/main/database/db-configure.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/db-configure.sh --zone $ZONE --quiet
+    - gcloud compute scp --tunnel-through-iap ~/init_vars.sh $APP_USER@$DST_HOST:/home/$APP_USER/scripts/init_vars.sh --zone $ZONE --quiet
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "ls -lr /home/$APP_USER/scripts/*; chmod +x /home/$APP_USER/scripts/*"
+    - gcloud compute ssh --tunnel-through-iap $APP_USER@$DST_HOST --zone $ZONE --quiet --command "source /home/$APP_USER/scripts/db-configure.sh"
+  environment:
+    name: ${SCOPE}-${TENANT}
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "production"'
+      when: manual

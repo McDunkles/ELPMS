@@ -1,0 +1,44 @@
+{
+  "realm" : "mocktender-dev",
+  "users" : [ {
+    "id" : "cbb2cac3-de43-4a5c-aa71-1957f965cb8d",
+    "createdTimestamp" : 1679551699465,
+    "username" : "testuser2",
+    "enabled" : true,
+    "totp" : false,
+    "emailVerified" : false,
+    "firstName" : "Joe",
+    "lastName" : "NHL",
+    "credentials" : [ ],
+    "disableableCredentialTypes" : [ ],
+    "requiredActions" : [ ],
+    "realmRoles" : [ "default-roles-mocktender-dev" ],
+    "notBefore" : 0,
+    "groups" : [ ]
+  }, {
+    "id" : "3a0bbf8b-86e2-4fa4-abfb-d1f2e39c4752",
+    "createdTimestamp" : 1679551266884,
+    "username" : "vueuser",
+    "enabled" : true,
+    "totp" : false,
+    "emailVerified" : false,
+    "firstName" : "Vue",
+    "lastName" : "JS",
+    "credentials" : [ {
+      "id" : "619a1aa8-00cc-46a5-9ca0-153b1bde4b69",
+      "type" : "password",
+      "userLabel" : "My password",
+      "createdDate" : 1679551338170,
+      "secretData" : "{\"value\":\"3zqMyyyS5bVZBlMKjJ/zpb1JnbB7vWkgFOET7OcSVyfPwgMYNSOrua1spIb7wqoeqysQSc7YYcIdT5JBt4NEYw==\",\"salt\":\"65oQBNh0ZlVOcP95y0BNuA==\",\"additionalParameters\":{}}",
+      "credentialData" : "{\"hashIterations\":27500,\"algorithm\":\"pbkdf2-sha256\",\"additionalParameters\":{}}"
+    } ],
+    "disableableCredentialTypes" : [ ],
+    "requiredActions" : [ ],
+    "realmRoles" : [ "default-roles-mocktender-dev" ],
+    "clientRoles" : {
+      "vue-demo" : [ "VueDemoUser" ]
+    },
+    "notBefore" : 0,
+    "groups" : [ ]
+  } ]
+}

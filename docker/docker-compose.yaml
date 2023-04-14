@@ -2,45 +2,24 @@ version: '3.2'
 
 services:
   
-  keycloak:
-    image: mk/keycloak:latest
-    build: keycloak/dev
-    container_name: mocktender-keycloak
-    command: ["-Djboss.socket.binding.port-offset=1200"]
-    environment:
-      DB_VENDOR: POSTGRES
-      DB_ADDR: postgres
-      DB_DATABASE: mocktail_test_db
-      DB_USER: postgres
-      DB_SCHEMA: keycloak
-      DB_PASSWORD: postgres
-      KEYCLOAK_USER: admin
-      KEYCLOAK_PASSWORD: Pa55w0rd
-    ports:
-      # 9280 = 8080 (default keykloak port) + 1200 (port offset)
-      - 9280:9280
-    depends_on:
-      - postgres
-  
-  
   postgres:
-    image: postgres:12
-    container_name: mocktender-postgres
+    image: postgres:13
+    container_name: postgres-elp-dev
     restart: always
     environment:
      - POSTGRES_PASSWORD=postgres
-     - POSTGRES_DB=mocktail_test_db
+     - POSTGRES_DB=elp-dev-db
     ports:
-     - 5532:5432
-    expose: [5532]
+     - 5632:5432
+    expose: [5632]
     volumes:
-      - mocktail-data-test:/var/lib/postgresql/data      
+      - elp_dev:/var/lib/postgresql/data      
       
 
 volumes:
-  mocktail-data-test:
+  elp_dev:
     driver: local
     driver_opts:
       type: 'none'
       o: 'bind'
-      device: 'F:\Comp Sys Eng - 4th Year\Winter 2023\SYSC3010\Project\Workspace\Testing\VolumeDir\Data\'
+      device: 'F:\Comp Sys Eng - 4th Year\Winter 2023\ELP\Workspace\VolumeDir\Data\'

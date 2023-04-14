@@ -1,0 +1,24 @@
+server:
+  port: 8373
+  
+spring:
+  jpa:
+    properties:
+      hibernate:
+        ddl-auto: validate
+      database-platform: org.hibernate.dialect.PostgreSQLDialect
+  datasource:
+    url: "jdbc:postgresql://localhost:5632/elp-dev-db?currentSchema=elp"
+    username: postgres
+    password: postgres
+
+
+postgres:
+  database: ${POSTGRES_DATABASE:elp-dev-db}
+  server: ${POSTGRES_SERVER:localhost}
+  port: ${POSTGRES_PORT:5632}
+
+
+spring.data.rest:
+  basePath: /api
+  default-media-type: application/hal+json

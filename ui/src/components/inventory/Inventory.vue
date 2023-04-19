@@ -4,13 +4,13 @@ import InventoryItem from './InventoryItem.vue'
 
 <template>
 
-<div class="title-div">
+  <h3 class="modify" v-on:click="this.add_item();">Add Item</h3>
 
-  <h2 class="title-text">Inventory</h2>
+  <div class="title-div">
+    <h2 class="title-text">Inventory</h2>
+  </div>
 
-</div>
-
-<div v-for="elem in items">
+  <div v-for="elem in items">
     <InventoryItem :item_name=elem.name v-on:click="this.on_click(elem);">
       <template #heading>{{elem.name}}</template>
     </InventoryItem>
@@ -72,7 +72,7 @@ import InventoryItem from './InventoryItem.vue'
       add_item() {
         console.log("Add Item!");
 
-        let newPath = "/item/addItem"
+        let newPath = "/inventory/addItem"
         this.$router.push({path: newPath});
       },
 
@@ -92,6 +92,25 @@ import InventoryItem from './InventoryItem.vue'
 
 
 <style scoped>
+
+h2 {
+
+margin-top: 2rem;
+flex: 1;
+text-align: center;
+
+font-size: 2.5rem;
+font-weight: 600;
+margin-bottom: 0.4rem;
+color: var(--color-heading);
+}
+
+
+h3 {
+width: 100%;
+display: inline-block;
+text-align: end;
+}
 
 .title-div {
   text-align: center;

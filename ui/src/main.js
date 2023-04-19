@@ -4,12 +4,24 @@ import router from './router'
 
 import './assets/main.css'
 
-//import auth from './js/auth'
+import auth from './js/auth'
 
 //const app = createApp(App);
 
 initGlobals();
-initApp();
+
+auth.init(
+  () => {
+    initApp();
+    //window.appEvents.on("app::logout", auth.logout.bind(auth));
+  },
+  (err) => {
+    console.error("Application initialization error");
+    console.error(err);
+  }
+);
+
+//initApp();
 
 function initGlobals() {
   let baseUrl = getBaseUrl();

@@ -26,7 +26,7 @@ public class Request {
 
     @Id //Primary key
     @Column(name = "id", nullable = false)
-    private int id;
+    private String id;
 
     @Column(name = "name", nullable = false)
     private String name;
@@ -39,4 +39,10 @@ public class Request {
 
     @Column(name = "return_date")
     private LocalDate return_date;
+
+    @Column(name = "requested_item1")
+    private int requested_item1;
+
+    @Column(name = "requested_item2")
+    private int requested_item2;
 }

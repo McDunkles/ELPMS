@@ -9,11 +9,11 @@
 		<version>2.3.1.RELEASE</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.mocktender</groupId>
-	<artifactId>mkt-persistence</artifactId>
+	<groupId>com.elpms</groupId>
+	<artifactId>elp-persistence</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>mkt-persistence</name>
-	<description>Mocktender Persistence Layer</description>
+	<name>elp-persistence</name>
+	<description>ELPMS Persistence Layer</description>
 
 	<properties>
 		<java.version>11</java.version>

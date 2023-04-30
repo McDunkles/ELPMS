@@ -40,7 +40,7 @@ public class ItemController {
 
     @RequestMapping(value = "/addItem", method = {RequestMethod.GET, RequestMethod.POST})
     public Item addItem(
-            @RequestParam("id") int id, @RequestParam("name") String name,
+            @RequestParam("id") String id, @RequestParam("name") String name,
             @RequestParam("available") boolean available
     ) {
 
@@ -48,5 +48,19 @@ public class ItemController {
 
         itemRepo.save(newItem);
         return newItem;
+    }
+
+    @RequestMapping(value = "/removeItem", method = {RequestMethod.GET, RequestMethod.DELETE})
+    public Item removeItem(
+            @RequestParam("id") String id
+    ) {
+
+        Item item = itemRepo.findById(id).orElse(null);
+
+        if (item != null) {
+            itemRepo.delete(item);
+        }
+
+        return item;
     }
 }

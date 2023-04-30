@@ -25,7 +25,7 @@ public class Item {
 
     @Id //Primary key
     @Column(name = "id", nullable = false)
-    private int id;
+    private String id;
 
     @Column(name = "name", nullable = false)
     private String name;
